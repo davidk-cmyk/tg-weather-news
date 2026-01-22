@@ -171,7 +171,8 @@ def fetch_all_news() -> list[dict] | None:
                 logger.warning(f"{source_name} RSS feed error: {feed.bozo_exception}")
                 continue
 
-            for entry in feed.entries:
+            # Limit to 10 entries per source
+            for entry in feed.entries[:10]:
                 # Get published time
                 published_time = None
                 if hasattr(entry, 'published_parsed') and entry.published_parsed:
