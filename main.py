@@ -7,9 +7,9 @@ Sends daily weather updates for Lisbon and top 10 Meduza news headlines in Russi
 import logging
 import os
 from datetime import datetime, time
+from zoneinfo import ZoneInfo
 
 import feedparser
-import pytz
 import requests
 from dotenv import load_dotenv
 from telegram import Update
@@ -168,8 +168,8 @@ def fetch_meduza_news() -> list[dict] | None:
 
 def format_daily_message() -> str:
     """Format the daily update message."""
-    uk_tz = pytz.timezone(TIMEZONE)
-    today = datetime.now(uk_tz).strftime("%d/%m/%Y")
+    tz = ZoneInfo(TIMEZONE)
+    today = datetime.now(tz).strftime("%d/%m/%Y")
 
     message_parts = []
 
@@ -313,9 +313,9 @@ def main() -> None:
 
     # Setup scheduler for daily updates using python-telegram-bot's job queue
     if TELEGRAM_CHAT_ID:
-        uk_tz = pytz.timezone(TIMEZONE)
+        tz = ZoneInfo(TIMEZONE)
         hour, minute = map(int, DAILY_UPDATE_TIME.split(":"))
-        target_time = time(hour=hour, minute=minute, tzinfo=uk_tz)
+        target_time = time(hour=hour, minute=minute, tzinfo=tz)
 
         application.job_queue.run_daily(
             scheduled_job,
