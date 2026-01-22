@@ -278,39 +278,27 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def scheduled_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Job to run at scheduled time."""
-    logger.info("Running scheduled daily update")
-    if TELEGRAM_CHAT_ID:
+    # Get chat_id from job context if available (for minutely updates), otherwise use TELEGRAM_CHAT_ID (for daily updates)
+    chat_id = context.job.chat_id if context.job and context.job.chat_id else TELEGRAM_CHAT_ID
+
+    logger.info(f"Running scheduled update for chat {chat_id}")
+    if chat_id:
         message = format_daily_message()
         try:
             await context.bot.send_message(
-                chat_id=TELEGRAM_CHAT_ID,
+                chat_id=chat_id,
                 text=message,
                 parse_mode="Markdown",
                 disable_web_page_preview=True
             )
-            logger.info(f"Daily update sent to {TELEGRAM_CHAT_ID}")
+            logger.info(f"Update sent to {chat_id}")
         except Exception as e:
-            logger.error(f"Failed to send scheduled update: {e}")
+            logger.error(f"Failed to send update to {chat_id}: {e}")
 
 
 async def minutely_on_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /minutelyon command - enable minutely updates for testing."""
     chat_id = update.effective_chat.id
-
-    # Only allow the configured chat ID to use this
-    if TELEGRAM_CHAT_ID:
-        configured_id = str(TELEGRAM_CHAT_ID).strip()
-        current_id = str(chat_id).strip()
-        logger.info(f"Auth check - Configured ID: '{configured_id}', Current ID: '{current_id}'")
-        if configured_id != current_id:
-            await update.message.reply_text(
-                f"⛔ Unauthorized. This command is only available to the bot owner.\n"
-                f"Your ID: {current_id}\nConfigured ID: {configured_id}"
-            )
-            return
-    else:
-        await update.message.reply_text("⚠️ TELEGRAM_CHAT_ID not configured. Cannot verify authorization.")
-        return
 
     # Check if minutely job already exists
     current_jobs = context.job_queue.get_jobs_by_name("minutely_update")
@@ -339,21 +327,6 @@ async def minutely_on_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def minutely_off_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /minutelyoff command - disable minutely updates."""
     chat_id = update.effective_chat.id
-
-    # Only allow the configured chat ID to use this
-    if TELEGRAM_CHAT_ID:
-        configured_id = str(TELEGRAM_CHAT_ID).strip()
-        current_id = str(chat_id).strip()
-        logger.info(f"Auth check - Configured ID: '{configured_id}', Current ID: '{current_id}'")
-        if configured_id != current_id:
-            await update.message.reply_text(
-                f"⛔ Unauthorized. This command is only available to the bot owner.\n"
-                f"Your ID: {current_id}\nConfigured ID: {configured_id}"
-            )
-            return
-    else:
-        await update.message.reply_text("⚠️ TELEGRAM_CHAT_ID not configured. Cannot verify authorization.")
-        return
 
     # Remove all minutely jobs
     current_jobs = context.job_queue.get_jobs_by_name("minutely_update")
