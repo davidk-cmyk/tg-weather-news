@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Telegram Weather & News Bot
-Sends daily weather updates for Lisbon and top 20 news headlines from multiple sources (all in Russian).
+Sends daily weather updates for Lisbon and top 30 news headlines from multiple sources (all in Russian).
 Sources: Meduza, Censor.net, BBC News, Publico.pt
 """
 
@@ -157,7 +157,7 @@ def translate_to_russian(text: str, source_lang: str = 'auto') -> str:
 
 
 def fetch_all_news() -> list[dict] | None:
-    """Fetch top 20 news headlines from all sources, sorted by timestamp."""
+    """Fetch top 30 news headlines from all sources, sorted by timestamp."""
     all_headlines = []
 
     for source_name, feed_url in NEWS_FEEDS.items():
@@ -171,7 +171,8 @@ def fetch_all_news() -> list[dict] | None:
                 logger.warning(f"{source_name} RSS feed error: {feed.bozo_exception}")
                 continue
 
-            for entry in feed.entries:
+            # Limit to 10 entries per source
+            for entry in feed.entries[:10]:
                 # Get published time
                 published_time = None
                 if hasattr(entry, 'published_parsed') and entry.published_parsed:
@@ -215,8 +216,8 @@ def fetch_all_news() -> list[dict] | None:
         reverse=True
     )
 
-    # Return top 20
-    return all_headlines[:20]
+    # Return top 30
+    return all_headlines[:30]
 
 
 def format_daily_message() -> str:
@@ -246,7 +247,7 @@ def format_daily_message() -> str:
     # News section
     headlines = fetch_all_news()
     if headlines:
-        news_lines = ["📰 Latest News - Top 20 Headlines (в хронологическом порядке)\n"]
+        news_lines = ["📰 Latest News - Top 30 Headlines (в хронологическом порядке)\n"]
         for i, headline in enumerate(headlines, 1):
             # Add source indicator
             source_emoji = {
@@ -258,7 +259,7 @@ def format_daily_message() -> str:
             news_lines.append(f"{i}. {source_emoji} [{headline['title']}]({headline['link']})")
         news_section = "\n".join(news_lines)
     else:
-        news_section = "📰 Latest News - Top 20 Headlines\n\n⚠️ News data temporarily unavailable"
+        news_section = "📰 Latest News - Top 30 Headlines\n\n⚠️ News data temporarily unavailable"
     message_parts.append(news_section)
 
     return "\n\n".join(message_parts)
@@ -296,7 +297,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "👋 Welcome to the Weather & News Bot!\n\n"
         "I'll send you daily updates at 8:00 AM (UK time) with:\n"
         "• Weather forecast for Lisbon\n"
-        "• Top 20 news headlines from multiple sources (all in Russian):\n"
+        "• Top 30 news headlines from multiple sources (all in Russian):\n"
         "  🇷🇺 Meduza\n"
         "  🇺🇦 Censor.net\n"
         "  🇬🇧 BBC News\n"
