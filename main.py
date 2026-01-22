@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Telegram Weather & News Bot
-Sends daily weather updates for Lisbon and top 10 Meduza news headlines in Russian.
+Sends daily weather updates for Lisbon and top 20 news headlines from multiple sources (all in Russian).
+Sources: Meduza, Censor.net, BBC News, Publico.pt
 """
 
 import logging
@@ -11,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 import feedparser
 import requests
+from deep_translator import GoogleTranslator
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -28,9 +30,16 @@ DAILY_UPDATE_TIME = os.getenv("DAILY_UPDATE_TIME", "08:00")
 # Constants
 LISBON_LAT = 38.7223
 LISBON_LON = -9.1393
-MEDUZA_RSS_URL = "https://meduza.io/rss/all"
 OPENWEATHERMAP_URL = "https://api.openweathermap.org/data/2.5/weather"
 OPENWEATHERMAP_FORECAST_URL = "https://api.openweathermap.org/data/2.5/forecast"
+
+# News RSS feeds
+NEWS_FEEDS = {
+    "Meduza": "https://meduza.io/rss/all",
+    "Censor.net": "https://censor.net/en/feed",
+    "BBC News": "https://feeds.bbci.co.uk/news/rss.xml",
+    "Publico.pt": "https://www.publico.pt/rss"  # Portuguese news instead of CNN Portugal
+}
 
 # Setup logging
 logging.basicConfig(
@@ -137,33 +146,77 @@ def fetch_weather() -> dict | None:
         return None
 
 
-def fetch_meduza_news() -> list[dict] | None:
-    """Fetch top 10 news headlines from Meduza RSS feed."""
+def translate_to_russian(text: str, source_lang: str = 'auto') -> str:
+    """Translate text to Russian using Google Translator."""
     try:
-        # Use requests to fetch RSS content for better reliability
-        response = requests.get(MEDUZA_RSS_URL, timeout=10)
-        response.raise_for_status()
-        feed = feedparser.parse(response.text)
-
-        if feed.bozo and not feed.entries:
-            logger.error(f"RSS feed error: {feed.bozo_exception}")
-            return None
-
-        headlines = []
-        for entry in feed.entries[:10]:
-            headlines.append({
-                "title": entry.title,
-                "link": entry.link
-            })
-
-        return headlines
-
-    except requests.RequestException as e:
-        logger.error(f"Meduza RSS request error: {e}")
-        return None
+        translator = GoogleTranslator(source=source_lang, target='ru')
+        return translator.translate(text)
     except Exception as e:
-        logger.error(f"Meduza RSS parsing error: {e}")
+        logger.error(f"Translation error: {e}")
+        return text  # Return original if translation fails
+
+
+def fetch_all_news() -> list[dict] | None:
+    """Fetch top 20 news headlines from all sources, sorted by timestamp."""
+    all_headlines = []
+
+    for source_name, feed_url in NEWS_FEEDS.items():
+        try:
+            # Use requests to fetch RSS content for better reliability
+            response = requests.get(feed_url, timeout=10)
+            response.raise_for_status()
+            feed = feedparser.parse(response.text)
+
+            if feed.bozo and not feed.entries:
+                logger.warning(f"{source_name} RSS feed error: {feed.bozo_exception}")
+                continue
+
+            for entry in feed.entries:
+                # Get published time
+                published_time = None
+                if hasattr(entry, 'published_parsed') and entry.published_parsed:
+                    published_time = entry.published_parsed
+                elif hasattr(entry, 'updated_parsed') and entry.updated_parsed:
+                    published_time = entry.updated_parsed
+
+                # Get title
+                title = entry.title if hasattr(entry, 'title') else "No title"
+
+                # Translate title to Russian if not from Meduza (already in Russian)
+                if source_name != "Meduza":
+                    title_ru = translate_to_russian(title)
+                else:
+                    title_ru = title
+
+                # Get link
+                link = entry.link if hasattr(entry, 'link') else ""
+
+                all_headlines.append({
+                    "title": title_ru,
+                    "link": link,
+                    "source": source_name,
+                    "timestamp": published_time
+                })
+
+        except requests.RequestException as e:
+            logger.error(f"{source_name} RSS request error: {e}")
+            continue
+        except Exception as e:
+            logger.error(f"{source_name} RSS parsing error: {e}")
+            continue
+
+    if not all_headlines:
+        logger.error("No headlines fetched from any source")
         return None
+
+    # Sort by timestamp (newest first), handling None timestamps
+    all_headlines.sort(
+        key=lambda x: x['timestamp'] if x['timestamp'] else (0,)*9,
+        reverse=True
+    )
+
+    # Return top 20
+    return all_headlines[:20]
 
 
 def format_daily_message() -> str:
@@ -191,14 +244,21 @@ def format_daily_message() -> str:
     message_parts.append(weather_section)
 
     # News section
-    headlines = fetch_meduza_news()
+    headlines = fetch_all_news()
     if headlines:
-        news_lines = ["📰 Meduza - Top 10 Headlines\n"]
+        news_lines = ["📰 Latest News - Top 20 Headlines (в хронологическом порядке)\n"]
         for i, headline in enumerate(headlines, 1):
-            news_lines.append(f"{i}. [{headline['title']}]({headline['link']})")
+            # Add source indicator
+            source_emoji = {
+                "Meduza": "🇷🇺",
+                "Censor.net": "🇺🇦",
+                "BBC News": "🇬🇧",
+                "Publico.pt": "🇵🇹"
+            }.get(headline['source'], "📰")
+            news_lines.append(f"{i}. {source_emoji} [{headline['title']}]({headline['link']})")
         news_section = "\n".join(news_lines)
     else:
-        news_section = "📰 Meduza - Top 10 Headlines\n\n⚠️ News data temporarily unavailable"
+        news_section = "📰 Latest News - Top 20 Headlines\n\n⚠️ News data temporarily unavailable"
     message_parts.append(news_section)
 
     return "\n\n".join(message_parts)
@@ -236,7 +296,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "👋 Welcome to the Weather & News Bot!\n\n"
         "I'll send you daily updates at 8:00 AM (UK time) with:\n"
         "• Weather forecast for Lisbon\n"
-        "• Top 10 news headlines from Meduza (in Russian)\n\n"
+        "• Top 20 news headlines from multiple sources (all in Russian):\n"
+        "  🇷🇺 Meduza\n"
+        "  🇺🇦 Censor.net\n"
+        "  🇬🇧 BBC News\n"
+        "  🇵🇹 Publico.pt\n\n"
         "Commands:\n"
         "/test - Get today's update now\n"
         "/minutelyon - Enable test mode (updates every minute)\n"
