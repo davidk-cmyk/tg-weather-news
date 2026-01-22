@@ -239,7 +239,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "• Top 10 news headlines from Meduza (in Russian)\n\n"
         "Commands:\n"
         "/test - Get today's update now\n"
-        "/help - Show this help message\n\n"
+        "/minutely_on - Enable test mode (updates every minute)\n"
+        "/minutely_off - Disable test mode\n"
+        "/help - Show all commands\n\n"
         f"Your chat ID: `{update.effective_chat.id}`"
     )
     await update.message.reply_text(welcome_message, parse_mode="Markdown")
@@ -266,6 +268,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/start - Initialize bot and show welcome message\n"
         "/test - Manually trigger today's update\n"
         "/today - Same as /test\n"
+        "/minutely_on - Enable test mode (updates every minute)\n"
+        "/minutely_off - Disable test mode\n"
         "/help - Show this help message\n\n"
         "📅 Automatic updates are sent daily at 8:00 AM UK time."
     )
@@ -289,6 +293,64 @@ async def scheduled_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             logger.error(f"Failed to send scheduled update: {e}")
 
 
+async def minutely_on_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /minutely_on command - enable minutely updates for testing."""
+    chat_id = update.effective_chat.id
+
+    # Only allow the configured chat ID to use this
+    if TELEGRAM_CHAT_ID and str(chat_id) != str(TELEGRAM_CHAT_ID):
+        await update.message.reply_text("⛔ Unauthorized. This command is only available to the bot owner.")
+        return
+
+    # Check if minutely job already exists
+    current_jobs = context.job_queue.get_jobs_by_name("minutely_update")
+    if current_jobs:
+        await update.message.reply_text("⚠️ Test mode is already enabled. Use /minutely_off to disable.")
+        return
+
+    # Add minutely job
+    context.job_queue.run_repeating(
+        scheduled_job,
+        interval=60,  # 60 seconds
+        first=5,      # Start after 5 seconds
+        name="minutely_update",
+        chat_id=chat_id
+    )
+
+    await update.message.reply_text(
+        "✅ Test mode enabled!\n\n"
+        "📨 You will now receive updates every minute.\n"
+        "⏱️ First update in 5 seconds.\n\n"
+        "Use /minutely_off to disable."
+    )
+    logger.info(f"Minutely test mode enabled for chat {chat_id}")
+
+
+async def minutely_off_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /minutely_off command - disable minutely updates."""
+    chat_id = update.effective_chat.id
+
+    # Only allow the configured chat ID to use this
+    if TELEGRAM_CHAT_ID and str(chat_id) != str(TELEGRAM_CHAT_ID):
+        await update.message.reply_text("⛔ Unauthorized. This command is only available to the bot owner.")
+        return
+
+    # Remove all minutely jobs
+    current_jobs = context.job_queue.get_jobs_by_name("minutely_update")
+    if not current_jobs:
+        await update.message.reply_text("⚠️ Test mode is not active.")
+        return
+
+    for job in current_jobs:
+        job.schedule_removal()
+
+    await update.message.reply_text(
+        "✅ Test mode disabled!\n\n"
+        "📅 Automatic updates will resume at the scheduled time (8:00 AM UK time)."
+    )
+    logger.info(f"Minutely test mode disabled for chat {chat_id}")
+
+
 def main() -> None:
     """Main function to run the bot."""
     # Validate configuration
@@ -309,6 +371,8 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("test", test_command))
     application.add_handler(CommandHandler("today", test_command))
+    application.add_handler(CommandHandler("minutely_on", minutely_on_command))
+    application.add_handler(CommandHandler("minutely_off", minutely_off_command))
     application.add_handler(CommandHandler("help", help_command))
 
     # Setup scheduler for daily updates using python-telegram-bot's job queue
